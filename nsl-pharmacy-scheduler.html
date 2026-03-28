@@ -258,7 +258,7 @@
     { id: 'mollie-mcgee-boyle', name: 'Mollie McGee-Boyle',  fte: 0.8, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
     { id: 'sean-michael',       name: 'Sean Michael',        fte: 1.0, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
     { id: 'mary-rotondo',       name: 'Mary Rotondo',        fte: 0.9, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
-    { id: 'scott-van-horn',     name: 'Scott Van Horn',      fte: 1.0, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
+    { id: 'scott-van-horn',     name: 'Scott Van Horn',      fte: 1.0, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [], noFteTarget: true },
   ];
 
   /**
@@ -272,6 +272,7 @@
     HIF:      { label: 'HIF',  desc: 'Home Infusion',  bg: '#f3e8ff', text: '#6b21a8', excelArgb: 'FFF3E8FF' },
     OP:       { label: 'OP',   desc: 'Outpatient',     bg: '#dcfce7', text: '#166534', excelArgb: 'FFDCFCE7' },
     CLINICAL: { label: 'CLIN', desc: 'Clinical',       bg: '#ffedd5', text: '#9a3412', excelArgb: 'FFFFEDD5' },
+    MANAGER:  { label: 'MGR',  desc: 'Manager',        bg: '#e2e8f0', text: '#1e293b', excelArgb: 'FFE2E8F0' },
     OE_EARLY: { label: 'OE+',  desc: 'OE Early 07:00', bg: '#fef3c7', text: '#78350f', excelArgb: 'FFFEF3C7' },
   };
 
@@ -398,7 +399,7 @@
     const workloadSummary = {};
     for (const emp of employees) {
       const assigned = assignments.filter(a => a.employeeId === emp.id && a.shiftCode !== 'OFF').length;
-      const target   = Math.round(emp.fte * targetShiftsPerWeekFor1FTE * (totalDays / 7));
+      const target   = emp.noFteTarget ? null : Math.round(emp.fte * targetShiftsPerWeekFor1FTE * (totalDays / 7));
       workloadSummary[emp.id] = { assigned, target };
     }
 
@@ -427,6 +428,10 @@
     const MO_ID      = 'mo-kim';
     const HUNG_ID    = 'hung-nguyen';
     const ANTHONY_ID = 'anthony-mcdonald';
+    const SCOTT_ID   = 'scott-van-horn';
+    const MOLLIE_ID  = 'mollie-mcgee-boyle';
+    const SEAN_ID    = 'sean-michael';
+    const MARY_ID    = 'mary-rotondo';
 
     // Mark employees who already have any assignment (locked or otherwise) today.
     for (const emp of employees) {
@@ -448,6 +453,14 @@
     const clinicalDemanded   = Number(demand['CLINICAL'] ?? 0) > 0;
     const reserveAnthonyForClinical = !moIsOff && !anthonyIsOff && clinicalDemanded;
 
+    // New rule: when Mollie, Sean AND Mary are all available, Scott is Manager.
+    // Exclude Scott from normal shift slots so he ends up unassigned after the loop.
+    const scottIsManager = (
+      !isOffOnDate(employees.find(e => e.id === MOLLIE_ID), date, allAssignments, preAssignedOff) &&
+      !isOffOnDate(employees.find(e => e.id === SEAN_ID),   date, allAssignments, preAssignedOff) &&
+      !isOffOnDate(employees.find(e => e.id === MARY_ID),   date, allAssignments, preAssignedOff)
+    );
+
     // Sort slots by priority: OIC → HIF → IV → OP → OE → CLINICAL.
     const slots = Object.entries(demand)
       .filter(([, count]) => Number(count) > 0)
@@ -467,6 +480,11 @@
         // Reserve Anthony for CLINICAL when both he and Mo are available.
         if (reserveAnthonyForClinical && shiftCode !== 'CLINICAL') {
           eligible = eligible.filter(e => e.id !== ANTHONY_ID);
+        }
+
+        // Exclude Scott from normal slots when he's in Manager mode.
+        if (scottIsManager) {
+          eligible = eligible.filter(e => e.id !== SCOTT_ID);
         }
 
         if (shiftCode === 'OIC' && moIsOff) {
@@ -521,6 +539,31 @@
         assignedToday.add(chosen.id);
         results.push({ date, employeeId: chosen.id, shiftCode, isFixed: false });
       }
+    }
+
+    // ── Post-loop: Anthony → CLINICAL if available and all main shifts filled ──
+    // This applies even when CLINICAL demand = 0; Anthony works CLINICAL whenever
+    // there is nothing else for him to cover.
+    const anthonyEmp = employees.find(e => e.id === ANTHONY_ID);
+    if (anthonyEmp && !assignedToday.has(ANTHONY_ID) &&
+        !isOffOnDate(anthonyEmp, date, allAssignments, preAssignedOff)) {
+      const mainShifts  = ['OIC', 'HIF', 'IV', 'OP', 'OE'];
+      const allMainFilled = mainShifts.every(code => {
+        const demanded = Number(demand[code] ?? 0);
+        return demanded === 0 || results.filter(r => r.shiftCode === code).length >= demanded;
+      });
+      if (allMainFilled) {
+        assignedToday.add(ANTHONY_ID);
+        results.push({ date, employeeId: ANTHONY_ID, shiftCode: 'CLINICAL', isFixed: false });
+      }
+    }
+
+    // ── Post-loop: Scott → MANAGER when Mollie, Sean, Mary all available ──────
+    const scottEmp = employees.find(e => e.id === SCOTT_ID);
+    if (scottIsManager && scottEmp && !assignedToday.has(SCOTT_ID) &&
+        !isOffOnDate(scottEmp, date, allAssignments, preAssignedOff)) {
+      assignedToday.add(SCOTT_ID);
+      results.push({ date, employeeId: SCOTT_ID, shiftCode: 'MANAGER', isFixed: false });
     }
 
     // Mark all remaining unassigned employees as OFF for this day.
@@ -1424,23 +1467,37 @@
       const ws = workloadSummary[emp.id];
       if (!ws) continue;
 
-      const pct    = ws.target > 0 ? Math.round((ws.assigned / ws.target) * 100) : 0;
-      const color  = workloadColor(ws.assigned, ws.target);
-      const barW   = Math.min(100, pct);
-
-      const card   = document.createElement('div');
+      const card = document.createElement('div');
       card.className = 'flex flex-col gap-1 px-3 py-2 bg-gray-800 rounded-lg';
       card.style.minWidth = '112px';
-      card.innerHTML = `
-        <span class="text-xs text-gray-300 leading-tight">${emp.name}</span>
-        <div class="flex items-baseline gap-1">
-          <span class="text-sm font-bold font-mono" style="color:${color}">${ws.assigned}</span>
-          <span class="text-xs text-gray-600">/ ${ws.target} shifts</span>
-        </div>
-        <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
-          <div class="h-1 rounded-full" style="width:${barW}%;background:${color}"></div>
-        </div>
-        <span class="text-xs font-mono" style="color:${color}">${pct}%</span>`;
+
+      if (ws.target === null) {
+        // Manager role — no FTE target, just show shift count.
+        card.innerHTML = `
+          <span class="text-xs text-gray-300 leading-tight">${emp.name}</span>
+          <div class="flex items-baseline gap-1">
+            <span class="text-sm font-bold font-mono text-slate-400">${ws.assigned}</span>
+            <span class="text-xs text-gray-600">shifts</span>
+          </div>
+          <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
+            <div class="h-1 rounded-full bg-slate-500" style="width:100%"></div>
+          </div>
+          <span class="text-xs text-gray-500">manager</span>`;
+      } else {
+        const pct   = ws.target > 0 ? Math.round((ws.assigned / ws.target) * 100) : 0;
+        const color = workloadColor(ws.assigned, ws.target);
+        const barW  = Math.min(100, pct);
+        card.innerHTML = `
+          <span class="text-xs text-gray-300 leading-tight">${emp.name}</span>
+          <div class="flex items-baseline gap-1">
+            <span class="text-sm font-bold font-mono" style="color:${color}">${ws.assigned}</span>
+            <span class="text-xs text-gray-600">/ ${ws.target} shifts</span>
+          </div>
+          <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
+            <div class="h-1 rounded-full" style="width:${barW}%;background:${color}"></div>
+          </div>
+          <span class="text-xs font-mono" style="color:${color}">${pct}%</span>`;
+      }
       list.appendChild(card);
     }
   }
