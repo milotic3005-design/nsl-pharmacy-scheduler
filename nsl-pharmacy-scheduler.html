@@ -283,7 +283,7 @@
 
   /** Default demand presets. */
   const DEFAULT_WEEKDAY_DEMAND = { OIC: 1, HIF: 1, IV: 1, OP: 1, OE: 1, CLINICAL: 0 };
-  const DEFAULT_WEEKEND_DEMAND = { OIC: 1, HIF: 1, IV: 0, OP: 0, OE: 0, CLINICAL: 0 };
+  const DEFAULT_WEEKEND_DEMAND = { OIC: 0, HIF: 0, IV: 0, OP: 0, OE: 0, CLINICAL: 0 };
 
   const WEEKDAY_NAMES  = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const OFF_CELL_ARGB  = 'FF4472C4';  // Blue fill used in exported .xlsx for OFF days
@@ -698,33 +698,57 @@
    * @param {*} val  - cell.value from ExcelJS
    * @returns {Date|null}
    */
+  /**
+   * Return a Date set to 12:00:00 UTC on the given calendar date.
+   * Using noon UTC guarantees d.toISOString().slice(0,10) returns the correct
+   * date string in every timezone (UTC-12 through UTC+14).
+   * @param {number} y  @param {number} m (0-based)  @param {number} d
+   * @returns {Date|null}
+   */
+  function _utcNoon(y, m, d) {
+    if (y < 2000 || y > 2040) return null;
+    const dt = new Date(Date.UTC(y, m, d, 12, 0, 0));
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  /**
+   * Extract a calendar date from any ExcelJS cell value type.
+   * Always returns a Date at 12:00:00 UTC so callers can safely use
+   * d.toISOString().slice(0,10) without timezone-shift errors.
+   *
+   * Handles:
+   *   ① JS Date objects (ExcelJS emits these as UTC midnight)
+   *   ② Excel serial numbers (integer days since 1900-01-00)
+   *   ③ ISO / "YYYY-MM-DD HH:MM:SS" strings — parsed by component, not Date()
+   *   ④ Formula result objects: { formula, result }
+   *   ⑤ Rich-text objects:     { richText: [{ text }, …] }
+   *
+   * @param {*} val  - cell.value from ExcelJS
+   * @returns {Date|null}
+   */
   function excelValToDate(val) {
     if (val === null || val === undefined) return null;
 
-    // ① Direct Date object
-    if (val instanceof Date) return val;
+    // ① Direct Date object — ExcelJS emits UTC midnight; extract UTC components.
+    if (val instanceof Date) {
+      return _utcNoon(val.getUTCFullYear(), val.getUTCMonth(), val.getUTCDate());
+    }
 
-    // ② Excel serial number (integer or float > 1)
+    // ② Excel serial number (days since 1900-01-00; >1 to skip booleans/0/1)
     if (typeof val === 'number' && isFinite(val) && val > 1) {
-      return new Date(Math.round((val - 25569) * 86400 * 1000));
+      const msEpoch = (Math.floor(val) - 25569) * 86400 * 1000;
+      const tmp     = new Date(msEpoch);
+      return _utcNoon(tmp.getUTCFullYear(), tmp.getUTCMonth(), tmp.getUTCDate());
     }
 
-    // ③ String — handle "YYYY-MM-DD HH:MM:SS" (space separator) and plain ISO
+    // ③ String — parse YYYY-MM-DD components directly to avoid new Date(str)
+    //    timezone ambiguity. Handles "2026-05-07", "2026-05-07 00:00:00", etc.
     if (typeof val === 'string' && val.trim()) {
-      const s = val.trim();
-      // Replace the first space in date-time strings so Date() can parse them
-      const normalized = s.replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T');
-      const d1 = new Date(normalized);
-      if (!isNaN(d1.getTime()) && d1.getFullYear() >= 2000) return d1;
-      // Fallback: try just the date portion
-      const dateOnly = s.slice(0, 10);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-        const d2 = new Date(dateOnly + 'T12:00:00');
-        if (!isNaN(d2.getTime())) return d2;
-      }
+      const m = val.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return _utcNoon(+m[1], +m[2] - 1, +m[3]);
     }
 
-    // ④ Formula result object: { formula: "...", result: <value> }
+    // ④ Formula result object: { formula: "...", result: <any of the above> }
     if (typeof val === 'object' && val !== null && val.result !== undefined) {
       return excelValToDate(val.result);
     }
@@ -773,10 +797,8 @@
       row.eachCell({ includeEmpty: false }, (cell, colNum) => {
         if (colNum === 1) return; // skip the label column
         const d = excelValToDate(cell.value);
-        if (d && !isNaN(d.getTime()) && d.getFullYear() >= 2020 && d.getFullYear() <= 2040) {
-          // Build a timezone-safe ISO date string
-          const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-            .toISOString().slice(0, 10);
+        if (d && !isNaN(d.getTime()) && d.getUTCFullYear() >= 2020 && d.getUTCFullYear() <= 2040) {
+          const iso = d.toISOString().slice(0, 10); // safe: d is always UTC noon via _utcNoon()
           tempDates[colNum] = iso;
         }
       });
