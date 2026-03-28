@@ -440,6 +440,14 @@
       employees.find(e => e.id === MO_ID), date, allAssignments, preAssignedOff,
     );
 
+    // New rule: when Mo AND Anthony are both available and CLINICAL is demanded,
+    // reserve Anthony for CLINICAL (exclude him from all other slots).
+    const anthonyIsOff = isOffOnDate(
+      employees.find(e => e.id === ANTHONY_ID), date, allAssignments, preAssignedOff,
+    );
+    const clinicalDemanded   = Number(demand['CLINICAL'] ?? 0) > 0;
+    const reserveAnthonyForClinical = !moIsOff && !anthonyIsOff && clinicalDemanded;
+
     // Sort slots by priority: OIC → HIF → IV → OP → OE → CLINICAL.
     const slots = Object.entries(demand)
       .filter(([, count]) => Number(count) > 0)
@@ -456,6 +464,11 @@
           emp.allowedShiftTypes.includes(shiftCode),                  // R1 / R3
         );
 
+        // Reserve Anthony for CLINICAL when both he and Mo are available.
+        if (reserveAnthonyForClinical && shiftCode !== 'CLINICAL') {
+          eligible = eligible.filter(e => e.id !== ANTHONY_ID);
+        }
+
         if (shiftCode === 'OIC' && moIsOff) {
           // ── R8: Mo is OFF → fill OIC with Anthony first, others second, Hung last ──
           // Keeping Hung as last resort preserves him for HIF (R7).
@@ -468,12 +481,28 @@
             ...(hung    ? [hung]    : []),
           ];
 
+        } else if (shiftCode === 'OIC') {
+          // ── New: Mo is available → pin Mo to OIC ─────────────────────────────────
+          const mo     = eligible.find(e => e.id === MO_ID);
+          const others = eligible.filter(e => e.id !== MO_ID);
+          eligible = mo
+            ? [mo, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek)]
+            : rankByDeficit(others, shiftCount, targetShiftsPerWeek);
+
         } else if (shiftCode === 'HIF') {
           // ── R7: Hung is the preferred employee for HIF ────────────────────────────
           const hung   = eligible.find(e => e.id === HUNG_ID);
           const others = eligible.filter(e => e.id !== HUNG_ID);
           eligible = hung
             ? [hung, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek)]
+            : rankByDeficit(others, shiftCount, targetShiftsPerWeek);
+
+        } else if (shiftCode === 'CLINICAL') {
+          // ── New: Anthony is preferred for CLINICAL ────────────────────────────────
+          const anthony = eligible.find(e => e.id === ANTHONY_ID);
+          const others  = eligible.filter(e => e.id !== ANTHONY_ID);
+          eligible = anthony
+            ? [anthony, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek)]
             : rankByDeficit(others, shiftCount, targetShiftsPerWeek);
 
         } else {
