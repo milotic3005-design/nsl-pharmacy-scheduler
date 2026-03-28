@@ -781,45 +781,54 @@
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('No worksheet found in uploaded workbook');
 
-    // ── Step 1: Auto-detect the NSL header row ────────────────────────────────
-    // Scan the first 10 rows and pick the one that contains the most date-like
-    // values after column A. This is robust against workbooks where the NSL row
-    // is not on row 1, or where there are extra title rows above it.
-    /** @type {Object.<number,string>} */
-    let dateByCol = {};
-    let nslRowNum = 1; // fallback
-    let maxDatesFound = 0;
+    // ── Step 1: Find ALL NSL date-header rows across the entire sheet ─────────
+    // The NSL workbook may have multiple stacked monthly sections, each with its
+    // own date-header row (e.g. May in rows 1-9, June in rows 11-18). We scan
+    // every row and treat any row that has ≥ 5 date-like values after column A
+    // as a section header. Column → date mappings are section-local (column 2
+    // may mean "5/1" in section 1 and "6/1" in section 2).
+    /** @type {Array<{rowNum: number, dateByCol: Object.<number,string>}>} */
+    const sections = [];
 
-    for (let tryRow = 1; tryRow <= 10; tryRow++) {
-      const row        = ws.getRow(tryRow);
-      const tempDates  = {};
-
+    ws.eachRow((row, rowNum) => {
+      /** @type {Object.<number,string>} */
+      const tempDates = {};
       row.eachCell({ includeEmpty: false }, (cell, colNum) => {
-        if (colNum === 1) return; // skip the label column
+        if (colNum === 1) return;
         const d = excelValToDate(cell.value);
         if (d && !isNaN(d.getTime()) && d.getUTCFullYear() >= 2020 && d.getUTCFullYear() <= 2040) {
-          const iso = d.toISOString().slice(0, 10); // safe: d is always UTC noon via _utcNoon()
-          tempDates[colNum] = iso;
+          tempDates[colNum] = d.toISOString().slice(0, 10);
         }
       });
-
-      if (Object.keys(tempDates).length > maxDatesFound) {
-        maxDatesFound  = Object.keys(tempDates).length;
-        dateByCol      = tempDates;
-        nslRowNum      = tryRow;
+      if (Object.keys(tempDates).length >= 5) {
+        sections.push({ rowNum, dateByCol: tempDates });
       }
-    }
+    });
 
-    const detectedDates = [...new Set(Object.values(dateByCol))].sort();
+    const detectedDates = [...new Set(sections.flatMap(s => Object.values(s.dateByCol)))].sort();
     if (detectedDates.length === 0) {
       throw new Error(
-        'No date columns found in the first 10 rows of the workbook. ' +
+        'No date columns found in the workbook. ' +
         'Expected rows with date values (e.g. 2026-05-03) after the first column. ' +
         'Make sure you are uploading the NSL master schedule .xlsx file.',
       );
     }
 
-    // ── Step 2: Parse employee rows (skipping NSL row + weekday-label row) ────
+    // For a given employee row number, return the section whose header row is
+    // closest above it (header row ≤ rowNum - 2, leaving room for the label row).
+    function sectionForRow(rowNum) {
+      let active = null;
+      for (const s of sections) {
+        if (s.rowNum <= rowNum - 2) active = s;
+        else break;
+      }
+      return active;
+    }
+
+    // Row numbers that are date-headers or their weekday-label rows — skip them.
+    const headerRowNums = new Set(sections.flatMap(s => [s.rowNum, s.rowNum + 1]));
+
+    // ── Step 2: Parse employee rows ───────────────────────────────────────────
     /** @type {Employee[]} */
     const employees        = [];
     /** @type {Object.<string,boolean>} */
@@ -829,54 +838,56 @@
     const seenEmpIds        = new Set();
 
     ws.eachRow((row, rowNum) => {
-      if (rowNum <= nslRowNum + 1) return; // skip NSL row and weekday-label row
+      if (headerRowNums.has(rowNum)) return; // skip header and label rows
+
+      const section = sectionForRow(rowNum);
+      if (!section) return; // before any date-header row
 
       const nameCell = row.getCell(1);
       const name     = nameCell.value ? String(nameCell.value).trim() : '';
       if (!name) return;
-      if (/schedule\s*key/i.test(name)) return; // stop at SCHEDULE KEY section
+      if (/schedule\s*key/i.test(name)) return;
 
       const empId   = toEmployeeId(name);
-      if (seenEmpIds.has(empId)) return; // deduplicate
-      seenEmpIds.add(empId);
+      // Only accept the 7 known employees — skip totals, labels, or other rows.
+      const defaults = DEFAULT_EMPLOYEES.find(e => e.id === empId);
+      if (!defaults) return;
 
-      const defaults      = DEFAULT_EMPLOYEES.find(e => e.id === empId);
-      const fixedOffDates = [];
+      if (!seenEmpIds.has(empId)) {
+        seenEmpIds.add(empId);
+        employees.push({
+          id:                empId,
+          name:              defaults.name,
+          fte:               defaults.fte,
+          allowedShiftTypes: defaults.allowedShiftTypes,
+          fixedOffDates:     [],
+        });
+      }
 
-      Object.entries(dateByCol).forEach(([colStr, date]) => {
-        const cell      = row.getCell(Number(colStr));
-        const isBlue    = isCellBlue(cell);
-        const rawText   = cell.value != null ? String(cell.value).trim() : '';
+      const emp = employees.find(e => e.id === empId);
+
+      Object.entries(section.dateByCol).forEach(([colStr, date]) => {
+        const cell       = row.getCell(Number(colStr));
+        const isBlue     = isCellBlue(cell);
+        const rawText    = cell.value != null ? String(cell.value).trim() : '';
         const isVacation = /vacation/i.test(rawText);
         const isLeave    = /leave\s+early|arrive\s+late/i.test(rawText);
         const isOut      = /^out\s*@/i.test(rawText);
         const shiftCode  = normalizeShiftCode(rawText);
 
-        // Blue fill or "Vacation" text → hard fixed OFF.
         if (isBlue || isVacation) {
-          fixedOffDates.push(date);
+          if (!emp.fixedOffDates.includes(date)) emp.fixedOffDates.push(date);
           preAssignedOff[`${empId}_${date}`] = true;
           if (!lockedAssignments.some(a => a.date === date && a.employeeId === empId)) {
-            const note = isVacation ? 'Vacation' : (rawText || undefined);
-            lockedAssignments.push({ date, employeeId: empId, shiftCode: 'OFF', isFixed: true, note });
+            lockedAssignments.push({ date, employeeId: empId, shiftCode: 'OFF', isFixed: true,
+              note: isVacation ? 'Vacation' : (rawText || undefined) });
           }
         } else if (shiftCode && shiftCode !== 'OFF') {
-          // Recognised shift code → locked working assignment.
           if (!lockedAssignments.some(a => a.date === date && a.employeeId === empId)) {
-            const note = (isLeave || isOut) ? rawText : undefined;
-            lockedAssignments.push({ date, employeeId: empId, shiftCode, isFixed: true, note });
+            lockedAssignments.push({ date, employeeId: empId, shiftCode, isFixed: true,
+              note: (isLeave || isOut) ? rawText : undefined });
           }
         }
-        // Blank cells and unrecognised text (time notes alone) are left unassigned.
-      });
-
-      employees.push({
-        id:               empId,
-        name,
-        fte:              defaults?.fte ?? 1.0,
-        allowedShiftTypes: defaults?.allowedShiftTypes ?? ['OE', 'IV', 'OIC', 'HIF', 'OP', 'CLINICAL'],
-        fixedOffDates,
-        notes:            defaults ? undefined : 'Unrecognised employee — defaulted to 1.0 FTE, all shifts',
       });
     });
 
