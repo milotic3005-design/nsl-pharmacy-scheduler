@@ -691,6 +691,54 @@
   }
 
   /**
+   * Extract a JavaScript Date from any ExcelJS cell value type.
+   * Handles: Date objects, Excel serial numbers, ISO strings, "YYYY-MM-DD HH:MM:SS"
+   * strings, formula result objects { formula, result }, and rich-text objects.
+   *
+   * @param {*} val  - cell.value from ExcelJS
+   * @returns {Date|null}
+   */
+  function excelValToDate(val) {
+    if (val === null || val === undefined) return null;
+
+    // ① Direct Date object
+    if (val instanceof Date) return val;
+
+    // ② Excel serial number (integer or float > 1)
+    if (typeof val === 'number' && isFinite(val) && val > 1) {
+      return new Date(Math.round((val - 25569) * 86400 * 1000));
+    }
+
+    // ③ String — handle "YYYY-MM-DD HH:MM:SS" (space separator) and plain ISO
+    if (typeof val === 'string' && val.trim()) {
+      const s = val.trim();
+      // Replace the first space in date-time strings so Date() can parse them
+      const normalized = s.replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T');
+      const d1 = new Date(normalized);
+      if (!isNaN(d1.getTime()) && d1.getFullYear() >= 2000) return d1;
+      // Fallback: try just the date portion
+      const dateOnly = s.slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+        const d2 = new Date(dateOnly + 'T12:00:00');
+        if (!isNaN(d2.getTime())) return d2;
+      }
+    }
+
+    // ④ Formula result object: { formula: "...", result: <value> }
+    if (typeof val === 'object' && val !== null && val.result !== undefined) {
+      return excelValToDate(val.result);
+    }
+
+    // ⑤ Rich-text object: { richText: [{ text, font }, ...] }
+    if (typeof val === 'object' && val !== null && Array.isArray(val.richText)) {
+      const text = val.richText.map(r => r.text || '').join('').trim();
+      return text ? excelValToDate(text) : null;
+    }
+
+    return null;
+  }
+
+  /**
    * Parse an uploaded .xlsx file using ExcelJS.
    * Returns employees, detected ISO dates, pre-assigned-OFF map, and locked assignments.
    *
@@ -709,38 +757,47 @@
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('No worksheet found in uploaded workbook');
 
-    // ── Step 1: Build column-index → ISO date map from Row 1 (NSL row) ───────
+    // ── Step 1: Auto-detect the NSL header row ────────────────────────────────
+    // Scan the first 10 rows and pick the one that contains the most date-like
+    // values after column A. This is robust against workbooks where the NSL row
+    // is not on row 1, or where there are extra title rows above it.
     /** @type {Object.<number,string>} */
-    const dateByCol = {};
-    const row1 = ws.getRow(1);
+    let dateByCol = {};
+    let nslRowNum = 1; // fallback
+    let maxDatesFound = 0;
 
-    row1.eachCell({ includeEmpty: false }, (cell, colNum) => {
-      if (colNum === 1) return; // skip "NSL" label in A1
-      let d = null;
-      const val = cell.value;
-      if (val instanceof Date) {
-        d = val;
-      } else if (typeof val === 'number') {
-        // Excel serial date (days since 1900-01-01, with the 1900 leap-year bug offset)
-        d = new Date(Math.round((val - 25569) * 86400 * 1000));
-      } else if (typeof val === 'string' && val.trim()) {
-        const parsed = new Date(val.trim());
-        if (!isNaN(parsed.getTime())) d = parsed;
+    for (let tryRow = 1; tryRow <= 10; tryRow++) {
+      const row        = ws.getRow(tryRow);
+      const tempDates  = {};
+
+      row.eachCell({ includeEmpty: false }, (cell, colNum) => {
+        if (colNum === 1) return; // skip the label column
+        const d = excelValToDate(cell.value);
+        if (d && !isNaN(d.getTime()) && d.getFullYear() >= 2020 && d.getFullYear() <= 2040) {
+          // Build a timezone-safe ISO date string
+          const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+            .toISOString().slice(0, 10);
+          tempDates[colNum] = iso;
+        }
+      });
+
+      if (Object.keys(tempDates).length > maxDatesFound) {
+        maxDatesFound  = Object.keys(tempDates).length;
+        dateByCol      = tempDates;
+        nslRowNum      = tryRow;
       }
-      if (d && !isNaN(d.getTime())) {
-        // Normalize to UTC date string to avoid timezone shifts.
-        const iso = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-          .toISOString().slice(0, 10);
-        dateByCol[colNum] = iso;
-      }
-    });
+    }
 
     const detectedDates = [...new Set(Object.values(dateByCol))].sort();
     if (detectedDates.length === 0) {
-      throw new Error('No date columns found in Row 1 of the workbook. Expected date values after cell A1 ("NSL").');
+      throw new Error(
+        'No date columns found in the first 10 rows of the workbook. ' +
+        'Expected rows with date values (e.g. 2026-05-03) after the first column. ' +
+        'Make sure you are uploading the NSL master schedule .xlsx file.',
+      );
     }
 
-    // ── Step 2: Parse employee rows (Row 3 onward, stopping at SCHEDULE KEY) ──
+    // ── Step 2: Parse employee rows (skipping NSL row + weekday-label row) ────
     /** @type {Employee[]} */
     const employees        = [];
     /** @type {Object.<string,boolean>} */
@@ -750,7 +807,7 @@
     const seenEmpIds        = new Set();
 
     ws.eachRow((row, rowNum) => {
-      if (rowNum <= 2) return; // skip NSL row and weekday-label row
+      if (rowNum <= nslRowNum + 1) return; // skip NSL row and weekday-label row
 
       const nameCell = row.getCell(1);
       const name     = nameCell.value ? String(nameCell.value).trim() : '';
