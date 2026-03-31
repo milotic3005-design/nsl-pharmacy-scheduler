@@ -258,7 +258,7 @@
     { id: 'mollie-mcgee-boyle', name: 'Mollie McGee-Boyle',  fte: 0.8, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
     { id: 'sean-michael',       name: 'Sean Michael',        fte: 1.0, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
     { id: 'mary-rotondo',       name: 'Mary Rotondo',        fte: 0.9, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [] },
-    { id: 'scott-van-horn',     name: 'Scott Van Horn',      fte: 1.0, allowedShiftTypes: ['IV', 'OP', 'OE'],                           fixedOffDates: [], noFteTarget: true },
+    { id: 'scott-van-horn',     name: 'Scott Van Horn',      fte: 1.0, allowedShiftTypes: ['IV', 'OP', 'OE', 'MGR'],                    fixedOffDates: [], noFteTarget: true },
   ];
 
   /**
@@ -345,8 +345,31 @@
     const ivStreak = {};
     for (const emp of employees) ivStreak[emp.id] = null;
 
+    // R11: weekly shift history — { employeeId: { shiftCode: count } }, resets each Mon.
+    /** @type {Object.<string,Object.<string,number>>} */
+    const weeklyShiftHistory = {};
+    for (const emp of employees) weeklyShiftHistory[emp.id] = {};
+    let currentWeekStart = null;
+
+    /** @param {string} dateStr @returns {string} ISO date of the Monday of that week */
+    function getWeekStart(dateStr) {
+      const d   = new Date(dateStr + 'T00:00:00');
+      const day = d.getDay();                     // 0 = Sun
+      const diff = day === 0 ? -6 : 1 - day;     // shift to Monday
+      const mon = new Date(d);
+      mon.setDate(d.getDate() + diff);
+      return mon.toISOString().slice(0, 10);
+    }
+
     // ── Process each date chronologically ──────────────────────────────────
     for (const date of dates) {
+      // R11: reset weekly history at the start of each new Mon–Fri week.
+      const weekStart = getWeekStart(date);
+      if (weekStart !== currentWeekStart) {
+        currentWeekStart = weekStart;
+        for (const emp of employees) weeklyShiftHistory[emp.id] = {};
+      }
+
       const demand      = dailyDemand[date] || {};
       const totalDemand = Object.values(demand).reduce((s, n) => s + (n || 0), 0);
 
@@ -363,11 +386,20 @@
         const dayResults = assignDay(
           date, demand, employees, assignments, shiftCount,
           preAssignedOff, violations, targetShiftsPerWeekFor1FTE,
+          weeklyShiftHistory,
         );
 
         for (const a of dayResults) {
           assignments.push(a);
           if (a.shiftCode !== 'OFF') shiftCount[a.employeeId] = (shiftCount[a.employeeId] || 0) + 1;
+        }
+
+        // R11: update weekly history from today's assignments.
+        for (const a of dayResults) {
+          if (a.shiftCode !== 'OFF' && a.shiftCode !== 'MANAGER') {
+            const hist = weeklyShiftHistory[a.employeeId];
+            hist[a.shiftCode] = (hist[a.shiftCode] || 0) + 1;
+          }
         }
 
         // ── R2: Mo and Hung must never both be OFF ─────────────────────────
@@ -420,7 +452,7 @@
    * @param {number} targetShiftsPerWeek
    * @returns {Assignment[]}
    */
-  function assignDay(date, demand, employees, allAssignments, shiftCount, preAssignedOff, violations, targetShiftsPerWeek) {
+  function assignDay(date, demand, employees, allAssignments, shiftCount, preAssignedOff, violations, targetShiftsPerWeek, weeklyShiftHistory) {
     /** @type {Assignment[]} */
     const results       = [];
     const assignedToday = new Set();
@@ -452,14 +484,6 @@
     );
     const anthonyPrefersClinical = !moIsOff && !anthonyIsOff;
 
-    // New rule: when Mollie, Sean AND Mary are all available, Scott is Manager.
-    // Exclude Scott from normal shift slots so he ends up unassigned after the loop.
-    const scottIsManager = (
-      !isOffOnDate(employees.find(e => e.id === MOLLIE_ID), date, allAssignments, preAssignedOff) &&
-      !isOffOnDate(employees.find(e => e.id === SEAN_ID),   date, allAssignments, preAssignedOff) &&
-      !isOffOnDate(employees.find(e => e.id === MARY_ID),   date, allAssignments, preAssignedOff)
-    );
-
     // Sort slots by priority: OIC → HIF → IV → OP → OE → CLINICAL.
     const slots = Object.entries(demand)
       .filter(([, count]) => Number(count) > 0)
@@ -483,11 +507,6 @@
           if (withoutAnthony.length > 0) eligible = withoutAnthony;
         }
 
-        // Exclude Scott from normal slots when he's in Manager mode.
-        if (scottIsManager) {
-          eligible = eligible.filter(e => e.id !== SCOTT_ID);
-        }
-
         if (shiftCode === 'OIC' && moIsOff) {
           // ── R8: Mo is OFF → fill OIC with Anthony first, others second, Hung last ──
           // Keeping Hung as last resort preserves him for HIF (R7).
@@ -496,37 +515,42 @@
           const others  = eligible.filter(e => e.id !== ANTHONY_ID && e.id !== HUNG_ID);
           eligible = [
             ...(anthony ? [anthony] : []),
-            ...rankByDeficit(others, shiftCount, targetShiftsPerWeek),
+            ...rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode),
             ...(hung    ? [hung]    : []),
           ];
 
         } else if (shiftCode === 'OIC') {
-          // ── New: Mo is available → pin Mo to OIC ─────────────────────────────────
+          // ── Mo is available → pin Mo to OIC ──────────────────────────────────────
           const mo     = eligible.find(e => e.id === MO_ID);
           const others = eligible.filter(e => e.id !== MO_ID);
           eligible = mo
-            ? [mo, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek)]
-            : rankByDeficit(others, shiftCount, targetShiftsPerWeek);
+            ? [mo, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode)]
+            : rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode);
 
         } else if (shiftCode === 'HIF') {
           // ── R7: Hung is the preferred employee for HIF ────────────────────────────
           const hung   = eligible.find(e => e.id === HUNG_ID);
           const others = eligible.filter(e => e.id !== HUNG_ID);
           eligible = hung
-            ? [hung, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek)]
-            : rankByDeficit(others, shiftCount, targetShiftsPerWeek);
+            ? [hung, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode)]
+            : rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode);
 
         } else if (shiftCode === 'CLINICAL') {
-          // ── New: Anthony is preferred for CLINICAL ────────────────────────────────
+          // ── R9: Anthony is preferred for CLINICAL ─────────────────────────────────
           const anthony = eligible.find(e => e.id === ANTHONY_ID);
           const others  = eligible.filter(e => e.id !== ANTHONY_ID);
           eligible = anthony
-            ? [anthony, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek)]
-            : rankByDeficit(others, shiftCount, targetShiftsPerWeek);
+            ? [anthony, ...rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode)]
+            : rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode);
 
         } else {
-          // ── R6: Generic deficit-based ranking for all other shift types ───────────
-          eligible = rankByDeficit(eligible, shiftCount, targetShiftsPerWeek);
+          // ── R6/R10: FTE-deficit ranking; Scott Van Horn is last resort ────────────
+          const scottEligible  = eligible.find(e => e.id === SCOTT_ID);
+          const othersEligible = eligible.filter(e => e.id !== SCOTT_ID);
+          eligible = [
+            ...rankByDeficit(othersEligible, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode),
+            ...(scottEligible ? [scottEligible] : []),
+          ];
         }
 
         if (eligible.length === 0) {
@@ -559,9 +583,9 @@
       }
     }
 
-    // ── Post-loop: Scott → MANAGER when Mollie, Sean, Mary all available ──────
+    // ── Post-loop: Scott → MANAGER if unassigned after all slots filled (R10) ──
     const scottEmp = employees.find(e => e.id === SCOTT_ID);
-    if (scottIsManager && scottEmp && !assignedToday.has(SCOTT_ID) &&
+    if (scottEmp && !assignedToday.has(SCOTT_ID) &&
         !isOffOnDate(scottEmp, date, allAssignments, preAssignedOff)) {
       assignedToday.add(SCOTT_ID);
       results.push({ date, employeeId: SCOTT_ID, shiftCode: 'MANAGER', isFixed: false });
@@ -662,11 +686,19 @@
    * @param {number} targetShiftsPerWeek  - target for 1.0 FTE
    * @returns {Employee[]}
    */
-  function rankByDeficit(employees, shiftCount, targetShiftsPerWeek) {
+  function rankByDeficit(employees, shiftCount, targetShiftsPerWeek, weeklyShiftHistory = null, shiftCode = null) {
     return [...employees].sort((a, b) => {
       const defA = (a.fte * targetShiftsPerWeek / 5) - (shiftCount[a.id] || 0);
       const defB = (b.fte * targetShiftsPerWeek / 5) - (shiftCount[b.id] || 0);
-      return defB - defA; // descending: highest deficit first
+      const diffDef = defB - defA; // descending: highest deficit first
+      if (Math.abs(diffDef) > 0.001) return diffDef;
+      // R11 soft tie-breaker: prefer employees consistent with their shift this week
+      if (weeklyShiftHistory && shiftCode) {
+        const cA = (weeklyShiftHistory[a.id] ?? {})[shiftCode] ?? 0;
+        const cB = (weeklyShiftHistory[b.id] ?? {})[shiftCode] ?? 0;
+        return cB - cA;
+      }
+      return 0;
     });
   }
 
@@ -1765,8 +1797,9 @@
           DEFAULT_EMPLOYEES — Mo and Hung have allowedShiftTypes: ['OIC','HIF'] only.
         R2 (Mo+Hung never both OFF):
           enforceR2() — called after every day, auto-recovers or records hard violation.
-        R3 (Scott/Molly/Mary/Sean → IV/OP/OE only):
-          assignDay() — same allowedShiftTypes filter (their arrays exclude OIC/HIF/CLINICAL).
+        R3 (Scott → IV/OP/OE/MGR; Molly/Mary/Sean → IV/OP/OE only):
+          assignDay() — allowedShiftTypes filter; Scott's array includes 'MGR',
+          Mollie/Mary/Sean arrays exclude OIC/HIF/CLINICAL/MGR.
         R4 (Anthony → any shift):
           DEFAULT_EMPLOYEES — Anthony has all codes in allowedShiftTypes.
         R5 (respect fixed OFF days):
@@ -1782,6 +1815,15 @@
         R9 (CLINICAL optional, Anthony only):
           DEFAULT_EMPLOYEES — only Anthony has 'CLINICAL' in allowedShiftTypes.
           assignDay() — `if (shiftCode === 'CLINICAL') continue;` when no eligible.
+        R10 (Scott last resort; MGR fallback):
+          assignDay() — for IV/OP/OE slots, Scott is appended after all other
+          eligible employees (deficit-ranked). Post-loop: Scott gets MANAGER if
+          he was not assigned to any slot (all regular demand was met without him).
+        R11 (soft: weekly shift consistency):
+          rankByDeficit() — secondary tie-breaker uses weeklyShiftHistory to prefer
+          employees whose shift this week matches the slot being filled.
+          generateSchedule() — tracks per-employee weekly shift counts, resets each
+          Monday, passes history into assignDay() → rankByDeficit().
 
      3. SAMPLE I/O — 5-day horizon (Mon 2026-05-04 to Fri 2026-05-08):
         Input: Mo Kim fixedOffDates: ['2026-05-06'], all other employees no fixed OFF.
@@ -1800,7 +1842,9 @@
      4. INVARIANT CHECKS (verified by rules above):
         • Mo and Hung never both OFF on a non-fixed day: enforceR2 auto-recovers.
         • Mo and Hung never assigned OE, IV, OP, or CLINICAL: allowedShiftTypes=['OIC','HIF'].
-        • Scott/Molly/Mary/Sean never assigned OIC, HIF, or CLINICAL: their arrays
+        • Scott never assigned OIC, HIF, or CLINICAL: his allowedShiftTypes=['IV','OP','OE','MGR'].
+          Scott is last resort for IV/OP/OE; he defaults to MANAGER when not needed.
+        • Molly/Mary/Sean never assigned OIC, HIF, CLINICAL, or MGR: their arrays
           contain only ['IV','OP','OE'].
         • FTE workload within ±10% over 4 weeks with no fixed OFF: rankByDeficit
           continuously balances across dates; Molly (0.8) gets ~80% of a full FTE's
