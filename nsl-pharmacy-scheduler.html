@@ -477,13 +477,6 @@
       employees.find(e => e.id === MO_ID), date, allAssignments, preAssignedOff,
     );
 
-    // Anthony prefers CLINICAL over regular shifts whenever Mo is available.
-    // (CLINICAL demand does NOT need to be > 0 — Anthony fills it post-loop.)
-    const anthonyIsOff = isOffOnDate(
-      employees.find(e => e.id === ANTHONY_ID), date, allAssignments, preAssignedOff,
-    );
-    const anthonyPrefersClinical = !moIsOff && !anthonyIsOff;
-
     // Sort slots by priority: OIC → HIF → IV → OP → OE → CLINICAL.
     const slots = Object.entries(demand)
       .filter(([, count]) => Number(count) > 0)
@@ -499,13 +492,6 @@
           !isOffOnDate(emp, date, allAssignments, preAssignedOff) &&  // R5
           emp.allowedShiftTypes.includes(shiftCode),                  // R1 / R3
         );
-
-        // Anthony prefers CLINICAL — exclude him from other slots if others can cover.
-        // Soft exclusion: only remove Anthony when at least one other eligible exists.
-        if (anthonyPrefersClinical && shiftCode !== 'CLINICAL') {
-          const withoutAnthony = eligible.filter(e => e.id !== ANTHONY_ID);
-          if (withoutAnthony.length > 0) eligible = withoutAnthony;
-        }
 
         if (shiftCode === 'OIC' && moIsOff) {
           // ── R8: Mo is OFF → fill OIC with Anthony first, others second, Hung last ──
@@ -544,13 +530,12 @@
             : rankByDeficit(others, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode);
 
         } else {
-          // ── R6/R10: FTE-deficit ranking; Scott Van Horn is last resort ────────────
+          // ── R6/R10: Scott is always MANAGER — only fill a regular slot if no one else can ──
           const scottEligible  = eligible.find(e => e.id === SCOTT_ID);
           const othersEligible = eligible.filter(e => e.id !== SCOTT_ID);
-          eligible = [
-            ...rankByDeficit(othersEligible, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode),
-            ...(scottEligible ? [scottEligible] : []),
-          ];
+          eligible = othersEligible.length > 0
+            ? rankByDeficit(othersEligible, shiftCount, targetShiftsPerWeek, weeklyShiftHistory, shiftCode)
+            : (scottEligible ? [scottEligible] : []);
         }
 
         if (eligible.length === 0) {
