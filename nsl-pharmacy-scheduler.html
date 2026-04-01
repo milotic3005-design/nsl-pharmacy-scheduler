@@ -32,6 +32,11 @@
   <!-- ExcelJS 4.3.0 browser bundle -->
   <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
 
+  <!-- Google Fonts — Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <!-- Tailwind CSS Play CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -39,51 +44,175 @@
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
   <style>
-    /* ── Custom scrollbars ───────────────────────────────────────── */
-    ::-webkit-scrollbar       { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #111827; }
-    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-
-    /* ── Sticky first column in the schedule table ───────────────── */
-    .sticky-emp-col {
-      position: sticky;
-      left: 0;
-      z-index: 5;
+    /* ── Design tokens ───────────────────────────────────────────── */
+    :root {
+      --bg-base:      #030712;
+      --bg-panel:     #0d1526;
+      --bg-surface:   #1a2540;
+      --bg-hover:     #243050;
+      --border:       #2a3a58;
+      --border-light: #334768;
+      --text-primary: #e8edf5;
+      --text-muted:   #8a9bbf;
+      --text-faint:   #4a5878;
+      --accent:       #3b82f6;
+      --accent-dim:   #1d4ed8;
+      --accent-glow:  rgba(59,130,246,0.18);
+      --green:        #22c55e;
+      --amber:        #f59e0b;
+      --red:          #ef4444;
+      --purple:       #a855f7;
     }
 
-    /* ── Shift badge hover effect ────────────────────────────────── */
-    .shift-badge { transition: filter 0.12s ease; }
-    .shift-badge:hover { filter: brightness(0.85); }
+    /* ── Base font ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: 'Inter', system-ui, sans-serif; }
+
+    /* ── Custom scrollbars ───────────────────────────────────────── */
+    ::-webkit-scrollbar       { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+    /* ── Sticky first column ─────────────────────────────────────── */
+    .sticky-emp-col { position: sticky; left: 0; z-index: 5; }
+
+    /* ── Shift badge ─────────────────────────────────────────────── */
+    .shift-badge {
+      transition: filter 0.12s ease, box-shadow 0.12s ease;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+    .shift-badge:hover { filter: brightness(0.88); }
+
+    /* ── Grid row hover ──────────────────────────────────────────── */
+    tr.sched-row:hover td { background-color: var(--bg-hover) !important; }
+    tr.sched-row:hover td.sticky-emp-col { background-color: var(--bg-hover) !important; }
 
     /* ── Fade-in for grid ────────────────────────────────────────── */
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-    #grid-container table { animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    #grid-container table { animation: fadeIn 0.25s ease; }
+
+    /* ── Toast slide-up ──────────────────────────────────────────── */
+    @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    #status-toast.visible { animation: slideUp 0.2s ease; }
+
+    /* ── KPI cards ───────────────────────────────────────────────── */
+    .kpi-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      flex: 1;
+      min-width: 140px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      transition: border-color 0.15s ease;
+    }
+    .kpi-card:hover { border-color: var(--border-light); }
+    .kpi-card-accent { display: block; width: 28px; height: 3px; border-radius: 2px; margin-bottom: 10px; }
+    .kpi-value { font-size: 22px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .kpi-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; letter-spacing: 0.03em; }
+
+    /* ── Workload bars ───────────────────────────────────────────── */
+    .wl-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+    .wl-name { font-size: 11px; color: var(--text-muted); width: 130px; shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .wl-bar-track { flex: 1; height: 5px; background: var(--bg-surface); border-radius: 3px; overflow: hidden; }
+    .wl-bar-fill  { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+    .wl-fraction  { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-muted); width: 52px; text-align: right; shrink: 0; }
+
+    /* ── Section headers ─────────────────────────────────────────── */
+    .sidebar-section-head {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-faint);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    /* ── Premium inputs ──────────────────────────────────────────── */
+    .prem-input {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-family: inherit;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      outline: none;
+    }
+    .prem-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    /* ── Generate button gradient + glow ─────────────────────────── */
+    #btn-generate {
+      background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+      border: none;
+      transition: box-shadow 0.15s ease, filter 0.15s ease;
+    }
+    #btn-generate:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 0 14px var(--accent-glow);
+    }
+    #btn-generate:active { filter: brightness(0.95); }
+
+    /* ── Header glass ────────────────────────────────────────────── */
+    #app-header {
+      background: rgba(3,7,18,0.88);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    /* ── Violation item animated stripe ─────────────────────────── */
+    .viol-item {
+      padding: 3px 10px 3px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-family: 'Inter', monospace;
+      position: relative;
+    }
+    .viol-item::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      border-radius: 2px 0 0 2px;
+    }
+    .viol-hard   { background: rgba(239,68,68,0.08);  color: #fca5a5; }
+    .viol-hard::before { background: #ef4444; }
+    .viol-demand { background: rgba(251,146,60,0.08); color: #fdba74; }
+    .viol-demand::before { background: #f97316; }
+    .viol-soft   { background: rgba(245,158,11,0.08); color: #fcd34d; }
+    .viol-soft::before { background: #f59e0b; }
   </style>
 </head>
 
-<body class="bg-gray-950 text-gray-100 h-screen flex flex-col overflow-hidden select-none">
+<body style="background:var(--bg-base);color:var(--text-primary)" class="h-screen flex flex-col overflow-hidden select-none">
 
   <!-- ═══════════════════════════════════════════════════════════════
        HEADER
   ════════════════════════════════════════════════════════════════ -->
-  <header class="flex items-center justify-between px-5 py-2.5 bg-gray-900 border-b border-gray-800 shrink-0">
+  <header id="app-header" class="flex items-center justify-between px-5 shrink-0" style="height:44px;border-bottom:1px solid var(--border)">
     <div class="flex items-center gap-3">
-      <i data-lucide="stethoscope" class="w-5 h-5 text-blue-400 shrink-0"></i>
-      <div class="leading-tight">
-        <div class="text-sm font-semibold text-white">NSL Pharmacy Scheduler</div>
-        <div class="text-xs text-gray-500">North Star Lodge · Oncology Infusion</div>
+      <i data-lucide="stethoscope" style="color:var(--accent)" class="w-4 h-4 shrink-0"></i>
+      <div style="line-height:1.25">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary)">NSL Pharmacy Scheduler</div>
+        <div style="font-size:11px;color:var(--text-faint)">North Star Lodge · Oncology Infusion</div>
       </div>
     </div>
     <div class="flex items-center gap-2">
-      <button id="btn-import"
-        class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-xs rounded-lg border border-gray-600 transition-colors">
-        <i data-lucide="upload" class="w-3.5 h-3.5"></i>
-        Import Master .xlsx
+      <button id="btn-import" style="display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--bg-surface);border:1px solid var(--border);border-radius:7px;font-size:11px;font-weight:500;color:var(--text-muted);font-family:inherit;cursor:pointer;transition:border-color 0.15s,color 0.15s,background 0.15s"
+        onmouseover="this.style.borderColor='var(--border-light)';this.style.color='var(--text-primary)'"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
+        <i data-lucide="upload" class="w-3 h-3"></i>
+        Import .xlsx
       </button>
       <input id="file-input" type="file" accept=".xlsx,.xlsm,.xlsb" class="hidden">
-      <button id="btn-export"
-        class="flex items-center gap-1.5 px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-xs rounded-lg border border-blue-600 transition-colors">
-        <i data-lucide="download" class="w-3.5 h-3.5"></i>
+      <button id="btn-export" style="display:flex;align-items:center;gap:6px;padding:5px 12px;background:var(--accent-dim);border:1px solid var(--accent);border-radius:7px;font-size:11px;font-weight:500;color:#fff;font-family:inherit;cursor:pointer;transition:filter 0.15s"
+        onmouseover="this.style.filter='brightness(1.12)'"
+        onmouseout="this.style.filter=''">
+        <i data-lucide="download" class="w-3 h-3"></i>
         Export .xlsx
       </button>
     </div>
@@ -95,42 +224,34 @@
   <div class="flex flex-1 overflow-hidden">
 
     <!-- ── Left control panel ────────────────────────────────────── -->
-    <aside class="w-[268px] shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col overflow-hidden">
-      <div class="flex-1 overflow-y-auto p-4 space-y-5">
+    <aside style="width:258px;min-width:258px;background:var(--bg-panel);border-right:1px solid var(--border)" class="flex flex-col overflow-hidden">
+      <div class="flex-1 overflow-y-auto" style="padding:16px;display:flex;flex-direction:column;gap:18px">
 
         <!-- Date range -->
         <section>
-          <h3 class="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            <i data-lucide="calendar-range" class="w-3.5 h-3.5"></i>
-            Schedule Range
-          </h3>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <label class="text-xs text-gray-500 w-10 shrink-0">Start</label>
-              <input type="date" id="range-start"
-                class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-blue-500">
+          <p class="sidebar-section-head">Schedule Range</p>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:center;gap:8px">
+              <label style="font-size:11px;color:var(--text-faint);width:36px;shrink:0">Start</label>
+              <input type="date" id="range-start" class="prem-input" style="flex:1;padding:5px 8px">
             </div>
-            <div class="flex items-center gap-2">
-              <label class="text-xs text-gray-500 w-10 shrink-0">End</label>
-              <input type="date" id="range-end"
-                class="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-blue-500">
+            <div style="display:flex;align-items:center;gap:8px">
+              <label style="font-size:11px;color:var(--text-faint);width:36px;shrink:0">End</label>
+              <input type="date" id="range-end" class="prem-input" style="flex:1;padding:5px 8px">
             </div>
           </div>
         </section>
 
         <!-- Daily demand config -->
         <section>
-          <h3 class="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            <i data-lucide="bar-chart-2" class="w-3.5 h-3.5"></i>
-            Daily Demand
-          </h3>
-          <div class="bg-gray-800 rounded-lg p-3">
-            <div class="grid grid-cols-3 text-xs text-gray-500 mb-2 px-0.5">
+          <p class="sidebar-section-head">Daily Demand</p>
+          <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <div style="display:grid;grid-template-columns:1fr 44px 44px;gap:4px;font-size:10px;color:var(--text-faint);margin-bottom:8px;padding:0 2px">
               <span>Shift</span>
-              <span class="text-center">Wkday</span>
-              <span class="text-center">Wkend</span>
+              <span style="text-align:center">Wkday</span>
+              <span style="text-align:center">Wkend</span>
             </div>
-            <div id="demand-config" class="space-y-1.5">
+            <div id="demand-config" style="display:flex;flex-direction:column;gap:6px">
               <!-- Populated by JS -->
             </div>
           </div>
@@ -138,16 +259,13 @@
 
         <!-- FTE config -->
         <section>
-          <h3 class="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            <i data-lucide="users" class="w-3.5 h-3.5"></i>
-            FTE Configuration
-          </h3>
-          <div class="bg-gray-800 rounded-lg p-3">
-            <div class="grid grid-cols-2 text-xs text-gray-500 mb-2 px-0.5">
+          <p class="sidebar-section-head">FTE Configuration</p>
+          <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+            <div style="display:grid;grid-template-columns:1fr 52px;gap:4px;font-size:10px;color:var(--text-faint);margin-bottom:8px;padding:0 2px">
               <span>Employee</span>
-              <span class="text-right">FTE</span>
+              <span style="text-align:right">FTE</span>
             </div>
-            <div id="fte-config" class="space-y-1.5">
+            <div id="fte-config" style="display:flex;flex-direction:column;gap:6px">
               <!-- Populated by JS -->
             </div>
           </div>
@@ -155,20 +273,16 @@
 
         <!-- Target shifts per week -->
         <section>
-          <h3 class="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-            <i data-lucide="target" class="w-3.5 h-3.5"></i>
-            Target Shifts / Week (1.0 FTE)
-          </h3>
+          <p class="sidebar-section-head">Target Shifts / Week (1.0 FTE)</p>
           <input type="number" id="target-shifts" value="5" min="1" max="7"
-            class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 focus:outline-none focus:border-blue-500">
+            class="prem-input" style="width:100%;padding:5px 8px">
         </section>
 
       </div>
 
       <!-- Generate button (sticky footer) -->
-      <div class="p-4 border-t border-gray-800 shrink-0">
-        <button id="btn-generate"
-          class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
+      <div style="padding:14px 16px;border-top:1px solid var(--border)">
+        <button id="btn-generate" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:9px 16px;border-radius:9px;color:#fff;font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;letter-spacing:0.01em">
           <i data-lucide="zap" class="w-3.5 h-3.5"></i>
           Generate Schedule
         </button>
@@ -179,19 +293,22 @@
     <main class="flex-1 flex flex-col overflow-hidden">
 
       <!-- Shift legend bar -->
-      <div class="flex items-center gap-2 px-4 py-1.5 bg-gray-900 border-b border-gray-800 shrink-0 flex-wrap">
-        <span class="text-xs text-gray-600 mr-1">Legend:</span>
-        <div id="shift-legend" class="flex items-center gap-1.5 flex-wrap"></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 16px;background:var(--bg-panel);border-bottom:1px solid var(--border);flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--text-faint);letter-spacing:0.05em;text-transform:uppercase;margin-right:2px">Legend</span>
+        <div id="shift-legend" class="flex items-center flex-wrap" style="gap:6px"></div>
       </div>
 
+      <!-- KPI cards row (hidden until schedule is generated) -->
+      <div id="kpi-row" style="display:none;gap:12px;padding:12px 16px;background:var(--bg-base);border-bottom:1px solid var(--border);flex-wrap:wrap"></div>
+
       <!-- Grid scroll area -->
-      <div class="flex-1 overflow-auto bg-gray-950">
+      <div class="flex-1 overflow-auto" style="background:var(--bg-base)">
         <div id="grid-container">
           <!-- Empty state -->
-          <div id="grid-empty" class="flex flex-col items-center justify-center h-64 text-gray-700">
-            <i data-lucide="calendar-days" class="w-10 h-10 mb-3 opacity-30"></i>
-            <p class="text-sm">Configure settings then click <span class="text-gray-500 font-medium">Generate Schedule</span></p>
-            <p class="text-xs mt-1 opacity-60">or import an existing master .xlsx file</p>
+          <div id="grid-empty" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:260px;color:var(--text-faint)">
+            <i data-lucide="calendar-days" style="width:36px;height:36px;margin-bottom:12px;opacity:0.25"></i>
+            <p style="font-size:13px">Configure settings then click <span style="color:var(--text-muted);font-weight:500">Generate Schedule</span></p>
+            <p style="font-size:11px;margin-top:4px;opacity:0.6">or import an existing master .xlsx file</p>
           </div>
         </div>
       </div>
@@ -203,36 +320,29 @@
        BOTTOM PANELS: VIOLATIONS + WORKLOAD
   ════════════════════════════════════════════════════════════════ -->
 
-  <!-- Violation / status panel -->
-  <div id="violation-panel" class="hidden shrink-0 border-t border-gray-800">
-    <!-- Content set by renderViolations() -->
+  <!-- Workload summary panel (inline horizontal bars) -->
+  <div id="workload-panel" class="hidden shrink-0" style="border-top:1px solid var(--border);background:var(--bg-panel);padding:10px 20px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <i data-lucide="bar-chart-2" style="width:13px;height:13px;color:var(--text-faint)"></i>
+      <span style="font-size:10px;font-weight:600;color:var(--text-faint);text-transform:uppercase;letter-spacing:0.07em">Workload vs. Target</span>
+    </div>
+    <div id="workload-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:2px"></div>
   </div>
 
-  <!-- Workload summary panel -->
-  <div id="workload-panel" class="hidden shrink-0 border-t border-gray-800 bg-gray-900 px-5 py-3">
-    <div class="flex items-start gap-2">
-      <i data-lucide="pie-chart" class="w-4 h-4 text-gray-500 mt-0.5 shrink-0"></i>
-      <div class="flex-1">
-        <p class="text-xs font-semibold text-gray-400 mb-2">Workload vs. FTE Target</p>
-        <div id="workload-list" class="flex flex-wrap gap-2"></div>
-      </div>
-    </div>
+  <!-- Violation / status panel -->
+  <div id="violation-panel" class="hidden shrink-0" style="border-top:1px solid var(--border)">
+    <!-- Content set by renderViolations() -->
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
        CELL EDIT DROPDOWN (singleton)
   ════════════════════════════════════════════════════════════════ -->
-  <div id="cell-dropdown"
-    class="hidden fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl overflow-hidden"
-    style="min-width:210px">
-  </div>
+  <div id="cell-dropdown" class="hidden fixed z-50 overflow-hidden" style="min-width:216px;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.6)"></div>
 
   <!-- ═══════════════════════════════════════════════════════════════
        STATUS TOAST
   ════════════════════════════════════════════════════════════════ -->
-  <div id="status-toast"
-    class="hidden fixed bottom-4 right-4 z-[100] bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-xs text-gray-200 shadow-xl flex items-center gap-2 max-w-xs">
-  </div>
+  <div id="status-toast" class="hidden fixed z-[100]" style="bottom:20px;right:20px;background:var(--bg-surface);border:1px solid var(--border-light);border-radius:9px;padding:9px 14px;font-size:12px;color:var(--text-primary);box-shadow:0 4px 20px rgba(0,0,0,0.5);display:none;align-items:center;gap:8px;max-width:320px"></div>
 
   <!-- ═══════════════════════════════════════════════════════════════
        APPLICATION SCRIPT
@@ -1115,17 +1225,13 @@
    */
   function showToast(msg, type = 'info') {
     const t = document.getElementById('status-toast');
-    t.innerHTML = '';
-    const icon     = document.createElement('span');
-    icon.className = type === 'error' ? 'text-red-400' : type === 'success' ? 'text-green-400' : 'text-blue-400';
-    icon.textContent = type === 'error' ? '✕' : type === 'success' ? '✓' : 'ℹ';
-    const text     = document.createElement('span');
-    text.textContent = msg;
-    t.appendChild(icon);
-    t.appendChild(text);
-    t.classList.remove('hidden');
+    const iconColor = type === 'error' ? 'var(--red)' : type === 'success' ? 'var(--green)' : 'var(--accent)';
+    const iconChar  = type === 'error' ? '✕' : type === 'success' ? '✓' : 'ℹ';
+    t.style.display = 'flex';
+    t.innerHTML = `<span style="color:${iconColor};font-size:13px">${iconChar}</span><span style="font-size:12px;color:var(--text-primary)">${msg}</span>`;
+    t.classList.add('visible');
     clearTimeout(t._timer);
-    t._timer = setTimeout(() => t.classList.add('hidden'), 4000);
+    t._timer = setTimeout(() => { t.style.display = 'none'; t.classList.remove('visible'); }, 4000);
   }
 
   /**
@@ -1151,18 +1257,17 @@
     for (const code of DEMAND_SHIFT_CODES) {
       const sc  = SHIFT_COLORS[code];
       const div = document.createElement('div');
-      div.className = 'flex items-center gap-1';
+      div.style.cssText = 'display:flex;align-items:center;gap:5px';
       div.innerHTML = `
-        <span class="px-1.5 py-px rounded text-xs font-semibold" style="background:${sc.bg};color:${sc.text}">${sc.label}</span>
-        <span class="text-gray-600 text-xs hidden sm:inline">${sc.desc}</span>`;
+        <span style="padding:2px 6px;border-radius:5px;font-size:11px;font-weight:600;background:${sc.bg};color:${sc.text}">${sc.label}</span>
+        <span style="font-size:10px;color:var(--text-faint)">${sc.desc}</span>`;
       el.appendChild(div);
     }
-    // Fixed OFF badge
-    const off     = document.createElement('div');
-    off.className = 'flex items-center gap-1';
+    const off = document.createElement('div');
+    off.style.cssText = 'display:flex;align-items:center;gap:5px';
     off.innerHTML = `
-      <span class="px-1.5 py-px rounded text-xs font-semibold" style="background:#1d4ed8;color:#fff">OFF</span>
-      <span class="text-gray-600 text-xs hidden sm:inline">Fixed Off</span>`;
+      <span style="padding:2px 6px;border-radius:5px;font-size:11px;font-weight:600;background:#1d4ed8;color:#fff">OFF</span>
+      <span style="font-size:10px;color:var(--text-faint)">Fixed Off</span>`;
     el.appendChild(off);
   }
 
@@ -1192,8 +1297,8 @@
     const headRow = thead.insertRow();
 
     const empTh      = document.createElement('th');
-    empTh.className  = 'sticky-emp-col bg-gray-900 border-b border-r border-gray-700 px-3 py-2 text-left text-xs font-medium text-gray-400';
-    empTh.style.minWidth = '172px';
+    empTh.className  = 'sticky-emp-col';
+    empTh.style.cssText = `min-width:172px;background:var(--bg-panel);border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:8px 12px;text-align:left;font-size:11px;font-weight:500;color:var(--text-faint);letter-spacing:0.05em;text-transform:uppercase`;
     empTh.textContent = 'Employee';
     headRow.appendChild(empTh);
 
@@ -1202,14 +1307,10 @@
       const dow   = d.getUTCDay();
       const isWE  = dow === 0 || dow === 6;
       const th    = document.createElement('th');
-      th.className = [
-        'border-b border-r border-gray-800 px-1 py-1 text-center font-normal',
-        isWE ? 'bg-gray-900 text-gray-600' : 'bg-gray-950 text-gray-400',
-      ].join(' ');
-      th.style.minWidth = '52px';
+      th.style.cssText = `min-width:48px;border-bottom:1px solid var(--border);border-right:1px solid ${isWE ? 'var(--border-light)' : 'var(--border)'};padding:4px 2px;text-align:center;font-weight:normal;background:${isWE ? 'var(--bg-panel)' : 'var(--bg-base)'}`;
       th.innerHTML = `
-        <div class="font-semibold text-xs">${WEEKDAY_NAMES[dow]}</div>
-        <div class="text-gray-600 text-xs">${d.getUTCMonth() + 1}/${d.getUTCDate()}</div>`;
+        <div style="font-size:10px;font-weight:600;color:${isWE ? 'var(--text-faint)' : 'var(--text-muted)'}">${WEEKDAY_NAMES[dow]}</div>
+        <div style="font-size:10px;color:var(--text-faint)">${d.getUTCMonth() + 1}/${d.getUTCDate()}</div>`;
       headRow.appendChild(th);
     }
 
@@ -1218,23 +1319,23 @@
 
     for (const emp of employees) {
       const tr     = document.createElement('tr');
-      tr.className = 'group';
+      tr.className = 'sched-row';
 
       // ── Employee name cell (sticky) ────────────────────────────────────────
       const nameTd     = document.createElement('td');
-      nameTd.className = 'sticky-emp-col bg-gray-900 group-hover:bg-gray-850 border-b border-r border-gray-800 px-3 py-1 whitespace-nowrap';
-      nameTd.style.minWidth = '172px';
+      nameTd.className = 'sticky-emp-col';
+      nameTd.style.cssText = `min-width:172px;background:var(--bg-panel);border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:6px 12px;white-space:nowrap`;
 
-      const ws      = workloadSummary[emp.id];
-      const badgeColor = ws ? workloadColor(ws.assigned, ws.target) : '#6b7280';
+      const ws         = workloadSummary[emp.id];
+      const badgeColor = ws ? workloadColor(ws.assigned, ws.target) : 'var(--text-faint)';
       const badgeLabel = ws ? `${ws.assigned}/${ws.target}` : '';
 
       nameTd.innerHTML = `
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-gray-200 text-xs font-medium leading-tight">${emp.name}</span>
-          <div class="flex items-center gap-1.5 shrink-0">
-            <span class="text-gray-600 text-xs">${emp.fte}FTE</span>
-            ${ws ? `<span class="text-xs font-mono px-1.5 py-px rounded-full text-white" style="background:${badgeColor}">${badgeLabel}</span>` : ''}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="font-size:12px;font-weight:500;color:var(--text-primary);line-height:1.3">${emp.name}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            <span style="font-size:10px;color:var(--text-faint)">${emp.fte}FTE</span>
+            ${ws ? `<span style="font-size:10px;font-variant-numeric:tabular-nums;padding:1px 6px;border-radius:10px;color:#fff;background:${badgeColor}">${badgeLabel}</span>` : ''}
           </div>
         </div>`;
       tr.appendChild(nameTd);
@@ -1248,19 +1349,15 @@
         const isFixed = a?.isFixed || !!preAssignedOff[`${emp.id}_${date}`];
 
         const td    = document.createElement('td');
-        td.className = [
-          'border-b border-r border-gray-800 p-0.5 text-center',
-          isWE ? 'bg-gray-950/70' : '',
-        ].join(' ');
-        td.style.minWidth = '52px';
+        td.style.cssText = `min-width:52px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);padding:3px;text-align:center;background:${isWE ? 'var(--bg-panel)' : 'var(--bg-base)'}`;
 
         if (!a || a.shiftCode === 'OFF') {
           if (isFixed) {
             // Fixed OFF (from Excel blue cell / Vacation) — solid blue badge.
-            td.innerHTML = `<div class="mx-auto px-1 py-px rounded text-xs font-semibold shift-badge" style="background:#1d4ed8;color:#fff;min-width:38px;display:inline-block" title="Fixed OFF">OFF</div>`;
+            td.innerHTML = `<div class="shift-badge" style="background:#1d4ed8;color:#fff;min-width:38px;display:inline-block;padding:2px 4px;border-radius:6px;font-size:11px;font-weight:600" title="Fixed OFF">OFF</div>`;
           } else {
             // Soft OFF (engine-generated) — nearly invisible.
-            td.innerHTML = `<div class="mx-auto px-1 py-px rounded text-xs shift-badge" style="background:transparent;color:#374151;min-width:38px;display:inline-block">&nbsp;</div>`;
+            td.innerHTML = `<div class="shift-badge" style="background:transparent;color:transparent;min-width:38px;display:inline-block;padding:2px 4px;border-radius:6px;font-size:11px">&nbsp;</div>`;
           }
         } else {
           const sc = SHIFT_COLORS[a.shiftCode];
@@ -1268,7 +1365,7 @@
           const fg   = sc ? sc.text : '#d1d5db';
           const lbl  = sc ? sc.label : a.shiftCode;
           const border = isFixed ? ';outline:1.5px solid #6b7280;outline-offset:-1px' : '';
-          td.innerHTML = `<div class="mx-auto px-1 py-px rounded text-xs font-semibold shift-badge" style="background:${bg};color:${fg};min-width:38px;display:inline-block${border}" title="${isFixed ? 'Fixed (imported)' : a.shiftCode}">${lbl}</div>`;
+          td.innerHTML = `<div class="shift-badge" style="background:${bg};color:${fg};min-width:38px;display:inline-block;padding:2px 4px;border-radius:6px;font-size:11px;font-weight:600${border}" title="${isFixed ? 'Fixed (imported)' : a.shiftCode}">${lbl}</div>`;
         }
 
         // Click to edit (non-fixed cells only).
@@ -1422,48 +1519,100 @@
     const panel = document.getElementById('violation-panel');
 
     if (!violations || violations.length === 0) {
-      panel.className  = 'shrink-0 border-t border-gray-800 px-5 py-2 bg-green-950/50 flex items-center gap-2';
-      panel.innerHTML  = `
-        <span class="text-green-400 text-sm">✓</span>
-        <span class="text-xs text-green-400 font-medium">All constraints satisfied — no violations</span>`;
+      panel.style.cssText = 'border-top:1px solid var(--border);padding:7px 20px;background:rgba(34,197,94,0.06);display:flex;align-items:center;gap:8px';
+      panel.innerHTML = `
+        <span style="color:var(--green);font-size:13px">✓</span>
+        <span style="font-size:11px;color:var(--green);font-weight:500">All constraints satisfied — no violations</span>`;
       panel.classList.remove('hidden');
       return;
     }
 
-    const hardCount = violations.filter(v => v.startsWith('HARD VIOLATION')).length;
+    const hardCount   = violations.filter(v => v.startsWith('HARD VIOLATION')).length;
     const demandCount = violations.filter(v => v.startsWith('DEMAND')).length;
-    const softCount = violations.filter(v => v.startsWith('SOFT WARNING')).length;
+    const softCount   = violations.filter(v => v.startsWith('SOFT WARNING')).length;
 
-    panel.className = 'shrink-0 border-t border-gray-800 px-5 py-3 bg-red-950/60';
+    panel.style.cssText = 'border-top:1px solid var(--border);padding:8px 20px;background:rgba(239,68,68,0.05)';
     panel.classList.remove('hidden');
+    panel.innerHTML = '';
 
     const header = document.createElement('div');
-    header.className = 'flex items-center gap-2 mb-2';
+    header.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px';
     header.innerHTML = `
-      <span class="text-red-400">⚠</span>
-      <span class="text-xs font-semibold text-red-300">
+      <span style="color:var(--red)">⚠</span>
+      <span style="font-size:11px;font-weight:600;color:#fca5a5">
         ${[
           hardCount   ? `${hardCount} hard violation${hardCount   > 1 ? 's' : ''}` : '',
           demandCount ? `${demandCount} unmet demand${demandCount > 1 ? 's' : ''}` : '',
           softCount   ? `${softCount} soft warning${softCount   > 1 ? 's' : ''}` : '',
         ].filter(Boolean).join(' · ')}
       </span>`;
-    panel.innerHTML = '';
     panel.appendChild(header);
 
     const list = document.createElement('div');
-    list.className = 'space-y-0.5 max-h-24 overflow-y-auto';
+    list.style.cssText = 'display:flex;flex-direction:column;gap:3px;max-height:88px;overflow-y:auto';
 
     for (const v of violations) {
       const item = document.createElement('div');
-      const isHard   = v.startsWith('HARD VIOLATION');
-      const isSoft   = v.startsWith('SOFT WARNING');
-      item.className = `text-xs font-mono ${isHard ? 'text-red-300' : isSoft ? 'text-yellow-400' : 'text-orange-300'}`;
+      const isHard = v.startsWith('HARD VIOLATION');
+      const isSoft = v.startsWith('SOFT WARNING');
+      item.className  = `viol-item ${isHard ? 'viol-hard' : isSoft ? 'viol-soft' : 'viol-demand'}`;
       item.textContent = v;
       list.appendChild(item);
     }
 
     panel.appendChild(list);
+  }
+
+  // ── KPI cards ────────────────────────────────────────────────────────────────
+
+  function renderKpiCards() {
+    const row = document.getElementById('kpi-row');
+    const { assignments, violations, dates, employees } = appState;
+
+    if (!dates.length || !assignments.length) {
+      row.style.display = 'none';
+      return;
+    }
+
+    // Compute metrics
+    const workShifts   = assignments.filter(a => a.shiftCode !== 'OFF');
+    const totalFilled  = workShifts.length;
+    const hardViol     = violations.filter(v => v.startsWith('HARD VIOLATION') || v.startsWith('DEMAND')).length;
+    const softViol     = violations.filter(v => v.startsWith('SOFT WARNING')).length;
+    const totalViol    = hardViol + softViol;
+
+    // Coverage: filled / (employees × dates, assuming everyone could work)
+    // Better: filled / total non-zero demand across all dates
+    const demandShifts = workShifts.length + hardViol; // proxy: filled + unmet
+    const coveragePct  = demandShifts > 0 ? Math.round((totalFilled / demandShifts) * 100) : 100;
+
+    // Staff on duty: use today if in range, else first date
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const refDate  = dates.includes(todayStr) ? todayStr : dates[0];
+    const onDuty   = workShifts.filter(a => a.date === refDate).length;
+
+    const violColor  = totalViol === 0 ? 'var(--green)' : hardViol > 0 ? 'var(--red)' : 'var(--amber)';
+    const violLabel  = totalViol === 0 ? '0 issues' : `${totalViol} issue${totalViol > 1 ? 's' : ''}`;
+    const coverColor = coveragePct >= 95 ? 'var(--green)' : coveragePct >= 80 ? 'var(--amber)' : 'var(--red)';
+
+    const cards = [
+      { accent: 'var(--accent)',  value: totalFilled,       label: 'Total Shifts Assigned' },
+      { accent: coverColor,       value: `${coveragePct}%`, label: 'Coverage Rate'          },
+      { accent: violColor,        value: violLabel,          label: 'Violations'             },
+      { accent: 'var(--purple)',  value: onDuty,            label: `On Duty (${refDate === todayStr ? 'Today' : 'First Day'})` },
+    ];
+
+    row.innerHTML = '';
+    for (const c of cards) {
+      const card = document.createElement('div');
+      card.className = 'kpi-card';
+      card.innerHTML = `
+        <span class="kpi-card-accent" style="background:${c.accent}"></span>
+        <div class="kpi-value" style="color:${c.accent}">${c.value}</div>
+        <div class="kpi-label">${c.label}</div>`;
+      row.appendChild(card);
+    }
+    row.style.display = 'flex';
   }
 
   // ── Workload summary ─────────────────────────────────────────────────────────
@@ -1485,38 +1634,24 @@
       const ws = workloadSummary[emp.id];
       if (!ws) continue;
 
-      const card = document.createElement('div');
-      card.className = 'flex flex-col gap-1 px-3 py-2 bg-gray-800 rounded-lg';
-      card.style.minWidth = '112px';
+      const row = document.createElement('div');
+      row.className = 'wl-row';
 
       if (ws.target === null) {
-        // Manager role — no FTE target, just show shift count.
-        card.innerHTML = `
-          <span class="text-xs text-gray-300 leading-tight">${emp.name}</span>
-          <div class="flex items-baseline gap-1">
-            <span class="text-sm font-bold font-mono text-slate-400">${ws.assigned}</span>
-            <span class="text-xs text-gray-600">shifts</span>
-          </div>
-          <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
-            <div class="h-1 rounded-full bg-slate-500" style="width:100%"></div>
-          </div>
-          <span class="text-xs text-gray-500">manager</span>`;
+        row.innerHTML = `
+          <span class="wl-name">${emp.name}</span>
+          <div class="wl-bar-track"><div class="wl-bar-fill" style="width:100%;background:var(--text-faint)"></div></div>
+          <span class="wl-fraction" style="color:var(--text-faint)">${ws.assigned} shifts</span>`;
       } else {
         const pct   = ws.target > 0 ? Math.round((ws.assigned / ws.target) * 100) : 0;
         const color = workloadColor(ws.assigned, ws.target);
         const barW  = Math.min(100, pct);
-        card.innerHTML = `
-          <span class="text-xs text-gray-300 leading-tight">${emp.name}</span>
-          <div class="flex items-baseline gap-1">
-            <span class="text-sm font-bold font-mono" style="color:${color}">${ws.assigned}</span>
-            <span class="text-xs text-gray-600">/ ${ws.target} shifts</span>
-          </div>
-          <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
-            <div class="h-1 rounded-full" style="width:${barW}%;background:${color}"></div>
-          </div>
-          <span class="text-xs font-mono" style="color:${color}">${pct}%</span>`;
+        row.innerHTML = `
+          <span class="wl-name">${emp.name}</span>
+          <div class="wl-bar-track"><div class="wl-bar-fill" style="width:${barW}%;background:${color}"></div></div>
+          <span class="wl-fraction" style="color:${color}">${ws.assigned}/${ws.target}</span>`;
       }
-      list.appendChild(card);
+      list.appendChild(row);
     }
   }
 
@@ -1529,18 +1664,18 @@
     for (const code of DEMAND_SHIFT_CODES) {
       const sc  = SHIFT_COLORS[code] || { label: code, bg: '#374151', text: '#d1d5db' };
       const div = document.createElement('div');
-      div.className = 'grid grid-cols-3 items-center gap-1.5';
+      div.style.cssText = 'display:grid;grid-template-columns:1fr 44px 44px;align-items:center;gap:6px';
       div.innerHTML = `
-        <div class="flex items-center gap-1">
-          <span class="w-2 h-2 rounded-full shrink-0" style="background:${sc.bg};border:1px solid ${sc.text}"></span>
-          <span class="text-gray-300 text-xs">${code}</span>
+        <div style="display:flex;align-items:center;gap:5px">
+          <span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${sc.bg};border:1px solid ${sc.text}"></span>
+          <span style="font-size:11px;color:var(--text-muted)">${code}</span>
         </div>
         <input type="number" id="demand-wd-${code}" min="0" max="5"
           value="${DEFAULT_WEEKDAY_DEMAND[code] ?? 0}"
-          class="bg-gray-700 border border-gray-600 rounded px-1 py-px text-xs text-center text-gray-100 w-full focus:outline-none focus:border-blue-500">
+          class="prem-input" style="padding:4px 2px;text-align:center;width:100%">
         <input type="number" id="demand-we-${code}" min="0" max="5"
           value="${DEFAULT_WEEKEND_DEMAND[code] ?? 0}"
-          class="bg-gray-700 border border-gray-600 rounded px-1 py-px text-xs text-center text-gray-100 w-full focus:outline-none focus:border-blue-500">`;
+          class="prem-input" style="padding:4px 2px;text-align:center;width:100%">`;
       container.appendChild(div);
     }
   }
@@ -1551,12 +1686,12 @@
 
     for (const emp of appState.employees) {
       const div      = document.createElement('div');
-      div.className  = 'flex items-center justify-between gap-2';
+      div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px';
       div.innerHTML  = `
-        <span class="text-gray-300 text-xs truncate">${emp.name}</span>
+        <span style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${emp.name}</span>
         <input type="number" id="fte-${emp.id}" min="0.1" max="1.0" step="0.1"
           value="${emp.fte}"
-          class="bg-gray-700 border border-gray-600 rounded px-1.5 py-px text-xs text-right text-gray-100 w-14 shrink-0 focus:outline-none focus:border-blue-500">`;
+          class="prem-input" style="padding:4px 6px;text-align:right;width:52px;flex-shrink:0">`;
       container.appendChild(div);
 
       // Update employee FTE immediately on change.
@@ -1642,6 +1777,7 @@
       renderFteConfig();
       renderGrid();
       renderViolations([]);
+      renderKpiCards();
       renderWorkloadSummary();
 
       showToast(
@@ -1702,6 +1838,7 @@
 
       renderGrid();
       renderViolations(output.violations);
+      renderKpiCards();
       renderWorkloadSummary();
 
       const shiftCount = output.assignments.filter(a => a.shiftCode !== 'OFF').length;
